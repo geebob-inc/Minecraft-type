@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mini Minecraft + Inventory</title>
+<style>
+  body { margin: 0; overflow: hidden; }
+  canvas { display: block; }
+
+  #info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-family: sans-serif;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+  }
+
+  #hotbar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+  }
+
+  .slot {
+    width: 50px;
+    height: 50px;
+    border: 2px solid white;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-family: sans-serif;
+    cursor: pointer;
+  }
+
+  .selected {
+    border: 2px solid yellow;
+  }
+</style>
+</head>
+<body>
+
+<div id="info">
+  WASD = Move | Mouse = Look | Click = Remove | Right Click = Place<br>
+  1-5 = Select block
+</div>
+
+<div id="hotbar"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Light
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(10,20,10);
+scene.add(light);
+
+// Controls
+let keys = {};
+document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+// Mouse look
+let yaw = 0, pitch = 0;
+
+document.body.addEventListener("mousemove", (e) => {
+  if (document.pointerLockElement === document.body) {
+    yaw -= e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+    pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+  }
+});
+
+document.body.addEventListener("click", () => {
+  document.body.requestPointerLock();
+});
+
+// Block types (INVENTORY)
+const blockTypes = [
+  { name: "Grass", color: 0x55aa55 },
+  { name: "Dirt",  color: 0x8B5A2B },
+  { name: "Stone", color: 0x888888 },
+  { name: "Wood",  color: 0xA0522D },
+  { name: "Sand",  color: 0xF4E3A6 }
+];
+
+let selectedBlock = 0;
+
+// Hotbar UI
+const hotbar = document.getElementById("hotbar");
+
+function updateHotbar() {
+  hotbar.innerHTML = "";
+  blockTypes.forEach((b, i) => {
+    const slot = document.createElement("div");
+    slot.className = "slot" + (i === selectedBlock ? " selected" : "");
+    slot.innerText = i + 1;
+    slot.onclick = () => {
+      selectedBlock = i;
+      updateHotbar();
+    };
+    hotbar.appendChild(slot);
+  });
+}
+updateHotbar();
+
+// Number keys for inventory
+document.addEventListener("keydown", (e) => {
+  if (e.key >= "1" && e.key <= "5") {
+    selectedBlock = parseInt(e.key) - 1;
+    updateHotbar();
+  }
+});
+
+// World
+const blocks = [];
+const geometry = new THREE.BoxGeometry(1,1,1);
+
+function addBlock(x, y, z, typeIndex=0) {
+  const material = new THREE.MeshLambertMaterial({
+    color: blockTypes[typeIndex].color
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(x,y,z);
+  mesh.userData.type = typeIndex;
+
+  scene.add(mesh);
+  blocks.push(mesh);
+}
+
+// Flat world
+for (let x=-10;x<=10;x++){
+  for (let z=-10;z<=10;z++){
+    addBlock(x,0,z,0);
+  }
+}
+
+// Raycasting
+const raycaster = new THREE.Raycaster();
+
+function getHit() {
+  raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+  const hits = raycaster.intersectObjects(blocks);
+  return hits[0];
+}
+
+// Remove block
+document.addEventListener("click", () => {
+  const hit = getHit();
+  if (hit) {
+    scene.remove(hit.object);
+    blocks.splice(blocks.indexOf(hit.object),1);
+  }
+});
+
+// Place block (right click)
+document.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+
+  const hit = getHit();
+  if (hit) {
+    const pos = hit.object.position.clone().add(hit.face.normal);
+    addBlock(pos.x,pos.y,pos.z,selectedBlock);
+  }
+});
+
+// Camera
+camera.position.set(0,5,10);
+
+// Movement
+let yawSpeed = 0;
+let pitchSpeed = 0;
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  const speed = 0.1;
+
+  const forward = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const right = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+
+  if(keys["w"]) camera.position.add(forward.clone().multiplyScalar(speed));
+  if(keys["s"]) camera.position.add(forward.clone().multiplyScalar(-speed));
+  if(keys["a"]) camera.position.add(right.clone().multiplyScalar(-speed));
+  if(keys["d"]) camera.position.add(right.clone().multiplyScalar(speed));
+
+  camera.rotation.set(pitch, yaw, 0);
+
+  renderer.render(scene,camera);
+}
+
+animate();
+
+// Resize
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
+</body>
+</html>
