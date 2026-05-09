@@ -1,355 +1,753 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Voxel World (Trees + Inventory)</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Minecraft Style Voxel Game</title>
 
 <style>
-body { margin:0; overflow:hidden; }
-canvas { display:block; }
 
-#ui {
-  position:absolute;
-  top:10px;
-  left:10px;
-  color:white;
-  font-family:sans-serif;
-  background:rgba(0,0,0,0.5);
-  padding:10px;
+body{
+    margin:0;
+    overflow:hidden;
+    background:black;
+    font-family:monospace;
+    image-rendering:pixelated;
 }
 
-#hotbar {
-  position:absolute;
-  bottom:20px;
-  left:50%;
-  transform:translateX(-50%);
-  display:flex;
-  gap:6px;
+canvas{
+    display:block;
 }
 
-.slot {
-  width:40px;
-  height:40px;
-  border:2px solid rgba(255,255,255,0.4);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:white;
-  font-family:sans-serif;
-  background:rgba(0,0,0,0.4);
+#crosshair{
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:8px;
+    height:8px;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
 }
 
-.slot.selected {
-  border:2px solid yellow;
+#crosshair::before,
+#crosshair::after{
+    content:"";
+    position:absolute;
+    background:white;
 }
+
+#crosshair::before{
+    width:2px;
+    height:20px;
+    left:3px;
+    top:-6px;
+}
+
+#crosshair::after{
+    width:20px;
+    height:2px;
+    left:-6px;
+    top:3px;
+}
+
+#ui{
+    position:absolute;
+    top:10px;
+    left:10px;
+    color:white;
+    background:rgba(0,0,0,.5);
+    padding:10px;
+    border:2px solid #222;
+}
+
+#hotbar{
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    gap:4px;
+    z-index:5;
+}
+
+.slot{
+    width:54px;
+    height:54px;
+    background:#222;
+    border:3px solid #555;
+    box-shadow:
+        inset -4px -4px rgba(0,0,0,.45),
+        inset 4px 4px rgba(255,255,255,.08);
+    background-size:cover;
+}
+
+.slot.selected{
+    border-color:white;
+    transform:translateY(-4px);
+}
+
+#inventoryUI{
+    position:absolute;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    width:540px;
+    background:#777;
+    border:6px solid #444;
+    padding:12px;
+    display:none;
+    z-index:100;
+}
+
+.inventory-grid{
+    display:grid;
+    grid-template-columns:repeat(9,1fr);
+    gap:4px;
+}
+
+.inv-slot{
+    width:50px;
+    height:50px;
+    background:#999;
+    border:3px solid #555;
+    background-size:cover;
+    box-shadow:
+        inset -3px -3px rgba(0,0,0,.4),
+        inset 3px 3px rgba(255,255,255,.15);
+}
+
 </style>
-
 </head>
 <body>
 
+<div id="crosshair"></div>
+
 <div id="ui">
-WASD move | Mouse look | Space jump<br>
-LMB break | RMB place | 1–5 select block
+WASD = Move<br>
+Shift = Sprint<br>
+Space = Jump<br>
+Mouse = Look<br>
+LMB = Break<br>
+RMB = Place<br>
+E = Inventory
 </div>
 
 <div id="hotbar"></div>
 
+<div id="inventoryUI">
+    <div class="inventory-grid" id="inventoryGrid"></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
-// ======================
-// SETUP
-// ======================
+
+// =====================================================
+// SCENE
+// =====================================================
+
 const scene = new THREE.Scene();
+
 scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x9fdfff, 20, 90);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-camera.position.set(15, 25, 15);
+const camera = new THREE.PerspectiveCamera(
+    75,
+    innerWidth/innerHeight,
+    0.1,
+    1000
+);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true });
+camera.position.set(10,18,10);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias:false
+});
+
 renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+
 document.body.appendChild(renderer.domElement);
 
-// LIGHT
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+// =====================================================
+// LIGHTING
+// =====================================================
 
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(10,20,10);
-scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-// ======================
+const sun = new THREE.DirectionalLight(0xffffff,1.2);
+
+sun.position.set(30,50,20);
+sun.castShadow = true;
+
+scene.add(sun);
+
+// =====================================================
+// TEXTURES
+// =====================================================
+
+function makeTexture(base, noise){
+
+    const size = 16;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = base;
+    ctx.fillRect(0,0,size,size);
+
+    for(let i=0;i<40;i++){
+
+        ctx.fillStyle =
+            noise[Math.floor(Math.random()*noise.length)];
+
+        ctx.fillRect(
+            Math.random()*size,
+            Math.random()*size,
+            2,
+            2
+        );
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+
+    return tex;
+}
+
+const textures = {
+
+    grass: makeTexture("#4CAF50", ["#2e7d32","#3c8f40","#66bb6a"]),
+    dirt: makeTexture("#8B5A2B", ["#6d3f1f","#9b6b3d"]),
+    stone: makeTexture("#888888", ["#777","#999","#666"]),
+    sand: makeTexture("#E6D090", ["#d8c17c","#f0e0a0"]),
+    wood: makeTexture("#8B5A2B", ["#5d4037","#6d4c41"]),
+    leaves: makeTexture("#2E8B57", ["#26734a","#3fa66e"])
+
+};
+
+const materials = {};
+
+for(let k in textures){
+
+    materials[k] = new THREE.MeshLambertMaterial({
+        map:textures[k]
+    });
+}
+
+// =====================================================
 // INVENTORY
-// ======================
+// =====================================================
+
 const inventory = [
-  { name:"Grass", color:0x3B8B3B },
-  { name:"Dirt",  color:0x8B5A2B },
-  { name:"Stone", color:0x777777 },
-  { name:"Sand",  color:0xE6D090 },
-  { name:"Wood",  color:0x8B5A2B }
+
+    "grass","dirt","stone","sand","wood","leaves",
+    "grass","stone","wood",
+
+    "sand","grass","dirt","stone","wood","leaves",
+    "grass","stone","wood",
+
+    "sand","grass","dirt","stone","wood","leaves",
+    "grass","stone","wood"
 ];
 
 let selected = 0;
 
 const hotbar = document.getElementById("hotbar");
+const inventoryUI = document.getElementById("inventoryUI");
+const inventoryGrid = document.getElementById("inventoryGrid");
+
+let inventoryOpen = false;
 
 function renderHotbar(){
-  hotbar.innerHTML = "";
-  inventory.forEach((b,i)=>{
-    const slot = document.createElement("div");
-    slot.className = "slot" + (i===selected ? " selected":"");
-    slot.textContent = i+1;
-    slot.style.background = "#" + b.color.toString(16);
-    hotbar.appendChild(slot);
-  });
-}
-renderHotbar();
 
-// ======================
+    hotbar.innerHTML = "";
+
+    for(let i=0;i<9;i++){
+
+        const item = inventory[i];
+
+        const slot = document.createElement("div");
+
+        slot.className =
+            "slot" + (i===selected ? " selected":"");
+
+        slot.style.backgroundImage =
+            `url(${textures[item].image.toDataURL()})`;
+
+        hotbar.appendChild(slot);
+    }
+}
+
+function renderInventory(){
+
+    inventoryGrid.innerHTML = "";
+
+    inventory.forEach((item,index)=>{
+
+        const slot = document.createElement("div");
+
+        slot.className = "inv-slot";
+
+        slot.style.backgroundImage =
+            `url(${textures[item].image.toDataURL()})`;
+
+        slot.onclick = ()=>{
+
+            const temp = inventory[selected];
+
+            inventory[selected] = inventory[index];
+
+            inventory[index] = temp;
+
+            renderHotbar();
+            renderInventory();
+        };
+
+        inventoryGrid.appendChild(slot);
+    });
+}
+
+renderHotbar();
+renderInventory();
+
+// =====================================================
 // INPUT
-// ======================
+// =====================================================
+
 const keys = {};
 
 addEventListener("keydown",e=>{
-  keys[e.key.toLowerCase()] = true;
 
-  const n = parseInt(e.key);
-  if(n>=1 && n<=inventory.length){
-    selected = n-1;
-    renderHotbar();
-  }
+    const k = e.key.toLowerCase();
+
+    keys[k] = true;
+
+    const n = parseInt(k);
+
+    if(n >= 1 && n <= 9){
+
+        selected = n - 1;
+        renderHotbar();
+    }
+
+    if(k === "e"){
+
+        inventoryOpen = !inventoryOpen;
+
+        inventoryUI.style.display =
+            inventoryOpen ? "block":"none";
+
+        if(inventoryOpen){
+
+            document.exitPointerLock();
+        }
+        else{
+
+            document.body.requestPointerLock();
+        }
+    }
 });
 
 addEventListener("keyup",e=>{
-  keys[e.key.toLowerCase()] = false;
+
+    keys[e.key.toLowerCase()] = false;
 });
 
-// ======================
+// =====================================================
 // MOUSE LOOK
-// ======================
-let yaw = 0, pitch = 0;
+// =====================================================
 
-document.body.onclick = () => document.body.requestPointerLock();
+let yaw = 0;
+let pitch = 0;
 
-document.addEventListener("mousemove",(e)=>{
-  if(document.pointerLockElement !== document.body) return;
+document.body.onclick = ()=>{
 
-  yaw -= e.movementX * 0.002;
-  pitch -= e.movementY * 0.002;
-  pitch = Math.max(-1.5, Math.min(1.5, pitch));
+    if(!inventoryOpen){
+
+        document.body.requestPointerLock();
+    }
+};
+
+document.addEventListener("mousemove",e=>{
+
+    if(document.pointerLockElement !== document.body)
+        return;
+
+    yaw -= e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+
+    pitch = Math.max(-1.5, Math.min(1.5,pitch));
 });
 
-// ======================
+// =====================================================
 // WORLD
-// ======================
+// =====================================================
+
 const world = new Map();
+
 const key = (x,y,z)=>`${x},${y},${z}`;
 
-function setBlock(x,y,z,v){
-  world.set(key(x,y,z), v);
+function setBlock(x,y,z,type){
+
+    world.set(key(x,y,z), type);
 }
 
 function getBlock(x,y,z){
-  return world.get(key(x,y,z));
+
+    return world.get(key(x,y,z));
 }
 
-// ======================
-// TREE SYSTEM
-// ======================
-function setTree(x, y, z) {
-  const height = 4 + Math.floor(Math.random() * 3);
+// =====================================================
+// TREES
+// =====================================================
 
-  for (let i = 0; i < height; i++) {
-    setBlock(x, y + i, z, 0x8B5A2B);
-  }
+function makeTree(x,y,z){
 
-  const top = y + height;
+    const h = 4 + Math.floor(Math.random()*3);
 
-  for (let lx = -2; lx <= 2; lx++) {
-    for (let lz = -2; lz <= 2; lz++) {
-      for (let ly = -1; ly <= 2; ly++) {
+    for(let i=0;i<h;i++){
 
-        const dist = Math.abs(lx) + Math.abs(lz) + Math.abs(ly);
-        if (dist > 4) continue;
-
-        setBlock(x + lx, top + ly, z + lz, 0x2E8B57);
-      }
+        setBlock(x,y+i,z,"wood");
     }
-  }
+
+    const top = y + h;
+
+    for(let lx=-2; lx<=2; lx++){
+    for(let ly=-2; ly<=2; ly++){
+    for(let lz=-2; lz<=2; lz++){
+
+        if(Math.abs(lx)+Math.abs(ly)+Math.abs(lz) > 4)
+            continue;
+
+        setBlock(
+            x+lx,
+            top+ly,
+            z+lz,
+            "leaves"
+        );
+    }}}
 }
 
-// ======================
-// TERRAIN GENERATION
-// ======================
-function height(x, z) {
-  return Math.floor(
-    Math.sin(x * 0.15) * Math.cos(z * 0.15) * 4 + 10
-  );
+// =====================================================
+// TERRAIN
+// =====================================================
+
+function terrainHeight(x,z){
+
+    return Math.floor(
+        Math.sin(x*0.12) *
+        Math.cos(z*0.12) * 5 + 10
+    );
 }
 
-function generateWorld() {
-  const size = 30;
+function generateWorld(){
 
-  for (let x = 0; x < size; x++) {
-    for (let z = 0; z < size; z++) {
+    const size = 48;
 
-      const h = height(x, z);
+    for(let x=0;x<size;x++){
+    for(let z=0;z<size;z++){
 
-      for (let y = 0; y < h - 3; y++) {
-        setBlock(x, y, z, 0x777777);
-      }
+        const h = terrainHeight(x,z);
 
-      for (let y = h - 3; y < h; y++) {
-        setBlock(x, y, z, 0x8B5A2B);
-      }
+        for(let y=0;y<h-3;y++){
 
-      setBlock(x, h, z, 0x3B8B3B);
+            setBlock(x,y,z,"stone");
+        }
 
-      if (Math.random() < 0.08) {
-        setTree(x, h + 1, z);
-      }
-    }
-  }
+        for(let y=h-3;y<h;y++){
+
+            setBlock(x,y,z,"dirt");
+        }
+
+        setBlock(x,h,z,"grass");
+
+        if(Math.random() < 0.05){
+
+            makeTree(x,h+1,z);
+        }
+    }}
 }
 
 generateWorld();
 
-// ======================
-// RENDER WORLD
-// ======================
-const geo = new THREE.BoxGeometry(1,1,1);
-const mat = new THREE.MeshLambertMaterial();
+// =====================================================
+// BLOCKS
+// =====================================================
 
-let mesh;
+const blocks = [];
 
 function rebuild(){
-  if(mesh) scene.remove(mesh);
 
-  const blocks = [];
+    blocks.forEach(b=>scene.remove(b));
+    blocks.length = 0;
 
-  for(let [k,v] of world){
-    const [x,y,z] = k.split(",").map(Number);
-    blocks.push({x,y,z,color:v});
-  }
+    const geo = new THREE.BoxGeometry(1,1,1);
 
-  mesh = new THREE.InstancedMesh(geo, mat, blocks.length);
+    for(let [k,type] of world){
 
-  const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
+        const [x,y,z] = k.split(",").map(Number);
 
-  blocks.forEach((b,i)=>{
-    dummy.position.set(b.x,b.y,b.z);
-    dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
+        const cube = new THREE.Mesh(
+            geo,
+            materials[type]
+        );
 
-    color.setHex(b.color);
-    mesh.setColorAt(i, color);
-  });
+        cube.position.set(x,y,z);
 
-  scene.add(mesh);
+        cube.castShadow = true;
+        cube.receiveShadow = true;
+
+        scene.add(cube);
+
+        blocks.push(cube);
+    }
 }
 
 rebuild();
 
-// ======================
+// =====================================================
 // RAYCAST
-// ======================
+// =====================================================
+
 const raycaster = new THREE.Raycaster();
 
 function getHit(){
-  raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-  return raycaster.intersectObject(mesh)[0];
+
+    raycaster.setFromCamera(
+        new THREE.Vector2(0,0),
+        camera
+    );
+
+    return raycaster.intersectObjects(blocks)[0];
 }
 
-// ======================
-// PLACE / BREAK
-// ======================
-addEventListener("mousedown",(e)=>{
-  const hit = getHit();
-  if(!hit) return;
+// =====================================================
+// BREAK / PLACE
+// =====================================================
 
-  const p = hit.point;
+addEventListener("mousedown",e=>{
 
-  if(e.button === 0){
-    const x = Math.floor(p.x);
-    const y = Math.floor(p.y);
-    const z = Math.floor(p.z);
+    if(inventoryOpen) return;
 
-    world.delete(key(x,y,z));
-    rebuild();
-  }
+    const hit = getHit();
 
-  if(e.button === 2){
-    e.preventDefault();
+    if(!hit) return;
 
-    const n = hit.face.normal;
+    const p = hit.object.position;
 
-    const x = Math.floor(p.x + n.x);
-    const y = Math.floor(p.y + n.y);
-    const z = Math.floor(p.z + n.z);
+    // BREAK
+    if(e.button === 0){
 
-    setBlock(x,y,z,inventory[selected].color);
-    rebuild();
-  }
+        world.delete(key(p.x,p.y,p.z));
+
+        rebuild();
+    }
+
+    // PLACE
+    if(e.button === 2){
+
+        e.preventDefault();
+
+        const n = hit.face.normal;
+
+        const x = p.x + n.x;
+        const y = p.y + n.y;
+        const z = p.z + n.z;
+
+        setBlock(
+            x,
+            y,
+            z,
+            inventory[selected]
+        );
+
+        rebuild();
+    }
 });
 
 addEventListener("contextmenu",e=>e.preventDefault());
 
-// ======================
-// MOVEMENT
-// ======================
+// =====================================================
+// COLLISION
+// =====================================================
+
+const PLAYER_WIDTH = 0.35;
+const PLAYER_HEIGHT = 1.8;
+
 let velY = 0;
 let onGround = false;
 
-function collide(x,y,z){
-  return world.has(key(Math.floor(x),Math.floor(y),Math.floor(z)));
+function solid(x,y,z){
+
+    return world.has(
+        key(
+            Math.floor(x),
+            Math.floor(y),
+            Math.floor(z)
+        )
+    );
 }
 
-// ======================
-// LOOP
-// ======================
+function playerCollides(x,y,z){
+
+    for(let px=-PLAYER_WIDTH; px<=PLAYER_WIDTH; px+=PLAYER_WIDTH){
+
+        for(let pz=-PLAYER_WIDTH; pz<=PLAYER_WIDTH; pz+=PLAYER_WIDTH){
+
+            for(let py=0; py<PLAYER_HEIGHT; py+=0.5){
+
+                if(solid(
+                    x + px,
+                    y + py,
+                    z + pz
+                )){
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+// =====================================================
+// GAME LOOP
+// =====================================================
+
 function animate(){
-  requestAnimationFrame(animate);
 
-  const speed = 0.15;
+    requestAnimationFrame(animate);
 
-  const forward = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
-  const right = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    if(!inventoryOpen){
 
-  if(keys["w"]) camera.position.add(forward.clone().multiplyScalar(speed));
-  if(keys["s"]) camera.position.add(forward.clone().multiplyScalar(-speed));
-  if(keys["a"]) camera.position.add(right.clone().multiplyScalar(-speed));
-  if(keys["d"]) camera.position.add(right.clone().multiplyScalar(speed));
+        const speed =
+            keys["shift"] ? 0.18 : 0.12;
 
-  velY -= 0.01;
-  camera.position.y += velY;
+        const forward = new THREE.Vector3(
+            -Math.sin(yaw),
+            0,
+            -Math.cos(yaw)
+        );
 
-  if(collide(camera.position.x, camera.position.y-1, camera.position.z)){
-    velY = 0;
-    onGround = true;
-    camera.position.y = Math.ceil(camera.position.y);
-  }
+        const right = new THREE.Vector3(
+            Math.cos(yaw),
+            0,
+            -Math.sin(yaw)
+        );
 
-  if(keys[" "] && onGround){
-    velY = 0.2;
-    onGround = false;
-  }
+        let moveX = 0;
+        let moveZ = 0;
 
-  camera.rotation.set(pitch,yaw,0);
+        if(keys["w"]){
 
-  renderer.render(scene,camera);
+            moveX += forward.x * speed;
+            moveZ += forward.z * speed;
+        }
+
+        if(keys["s"]){
+
+            moveX -= forward.x * speed;
+            moveZ -= forward.z * speed;
+        }
+
+        if(keys["a"]){
+
+            moveX -= right.x * speed;
+            moveZ -= right.z * speed;
+        }
+
+        if(keys["d"]){
+
+            moveX += right.x * speed;
+            moveZ += right.z * speed;
+        }
+
+        // X collision
+        const nextX = camera.position.x + moveX;
+
+        if(!playerCollides(
+            nextX,
+            camera.position.y - PLAYER_HEIGHT,
+            camera.position.z
+        )){
+            camera.position.x = nextX;
+        }
+
+        // Z collision
+        const nextZ = camera.position.z + moveZ;
+
+        if(!playerCollides(
+            camera.position.x,
+            camera.position.y - PLAYER_HEIGHT,
+            nextZ
+        )){
+            camera.position.z = nextZ;
+        }
+
+        // gravity
+        velY -= 0.012;
+
+        const nextY = camera.position.y + velY;
+
+        if(!playerCollides(
+            camera.position.x,
+            nextY - PLAYER_HEIGHT,
+            camera.position.z
+        )){
+            camera.position.y = nextY;
+            onGround = false;
+        }
+        else{
+
+            if(velY < 0){
+
+                onGround = true;
+            }
+
+            velY = 0;
+        }
+
+        // jump
+        if(keys[" "] && onGround){
+
+            velY = 0.24;
+            onGround = false;
+        }
+
+        camera.rotation.order = "YXZ";
+
+        camera.rotation.y = yaw;
+        camera.rotation.x = pitch;
+    }
+
+    renderer.render(scene,camera);
 }
 
 animate();
 
-// ======================
+// =====================================================
 // RESIZE
-// ======================
-addEventListener("resize",()=>{
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-});
-</script>
+// =====================================================
 
+addEventListener("resize",()=>{
+
+    camera.aspect = innerWidth/innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        innerWidth,
+        innerHeight
+    );
+});
+
+</script>
 </body>
 </html>
