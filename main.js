@@ -1,78 +1,76 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import { PointerLockControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/PointerLockControls.js";
-import { createWorld, removeBlock, placeBlock, getBlocks } from "./world.js";
+import { World } from "./world.js";
 
-let scene, camera, renderer, controls;
-let raycaster = new THREE.Raycaster();
-let mouse = new THREE.Vector2();
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
 
-init();
-animate();
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const controls = new PointerLockControls(camera, document.body);
+document.body.addEventListener("click", () => controls.lock());
+scene.add(controls.getObject());
+
+camera.position.y = 2;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444));
 
 /* =======================
-   INIT
+   WORLD
 ======================= */
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87ceeb);
+const world = new World(scene);
+world.generateInitial();
 
-  camera = new THREE.PerspectiveCamera(
-    75,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000
-  );
+/* =======================
+   INPUT
+======================= */
+const keys = {};
+addEventListener("keydown", e => keys[e.code] = true);
+addEventListener("keyup", e => keys[e.code] = false);
 
-  renderer = new THREE.WebGLRenderer();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+/* =======================
+   MOVEMENT
+======================= */
+function updatePlayer() {
+  const speed = 0.12;
 
-  controls = new PointerLockControls(camera, document.body);
-  document.body.addEventListener("click", () => controls.lock());
-  scene.add(controls.getObject());
-
-  camera.position.y = 2;
-
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444));
-
-  createWorld(scene);
-
-  /* movement */
-  const keys = {};
-  document.addEventListener("keydown", e => keys[e.code] = true);
-  document.addEventListener("keyup", e => keys[e.code] = false);
-
-  function move() {
-    const speed = 0.12;
-    if (keys["KeyW"]) controls.moveForward(speed);
-    if (keys["KeyS"]) controls.moveForward(-speed);
-    if (keys["KeyA"]) controls.moveRight(-speed);
-    if (keys["KeyD"]) controls.moveRight(speed);
-  }
-
-  function loopMove() {
-    move();
-    requestAnimationFrame(loopMove);
-  }
-  loopMove();
-
-  /* mouse */
-  window.addEventListener("click", () => {
-    raycaster.setFromCamera(mouse, camera);
-    removeBlock(raycaster, scene);
-  });
-
-  window.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    raycaster.setFromCamera(mouse, camera);
-    placeBlock(raycaster, scene);
-  });
+  if (keys["KeyW"]) controls.moveForward(speed);
+  if (keys["KeyS"]) controls.moveForward(-speed);
+  if (keys["KeyA"]) controls.moveRight(-speed);
+  if (keys["KeyD"]) controls.moveRight(speed);
 }
 
 /* =======================
-   RENDER LOOP
+   RAYCAST (BLOCK EDITS)
+======================= */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+addEventListener("click", () => {
+  raycaster.setFromCamera(mouse, camera);
+  world.breakBlock(raycaster);
+});
+
+addEventListener("contextmenu", e => {
+  e.preventDefault();
+  raycaster.setFromCamera(mouse, camera);
+  world.placeBlock(raycaster);
+});
+
+/* =======================
+   LOOP
 ======================= */
 function animate() {
   requestAnimationFrame(animate);
+
+  updatePlayer();
+
+  world.update(camera.position);
+
   renderer.render(scene, camera);
 }
+animate();
