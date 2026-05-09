@@ -1,77 +1,86 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { createNoise2D } from "https://cdn.skypack.dev/simplex-noise";
+import { Chunk } from "./chunks.js";
 
-const CHUNK_SIZE = 20;
-const blocks = [];
+export class World {
+  constructor(scene) {
+    this.scene = scene;
 
-const geo = new THREE.BoxGeometry(1, 1, 1);
-const mat = new THREE.MeshStandardMaterial({ color: 0x55aa55 });
+    this.chunks = new Map(); // chunk storage
+    this.chunkSize = 16;
+    this.renderDistance = 2;
+  }
 
-const noise = createNoise2D();
-
-/* =======================
-   HEIGHT FUNCTION
-======================= */
-function height(x, z) {
-  return Math.floor(noise(x * 0.1, z * 0.1) * 6 + 6);
-}
-
-/* =======================
-   CREATE WORLD
-======================= */
-export function createWorld(scene) {
-  for (let x = -CHUNK_SIZE; x < CHUNK_SIZE; x++) {
-    for (let z = -CHUNK_SIZE; z < CHUNK_SIZE; z++) {
-      const h = height(x, z);
-
-      for (let y = 0; y < h; y++) {
-        const block = new THREE.Mesh(geo, mat);
-        block.position.set(x, y, z);
-
-        scene.add(block);
-        blocks.push(block);
+  /* =======================
+     INITIAL WORLD
+  ======================= */
+  generateInitial() {
+    for (let x = -1; x <= 1; x++) {
+      for (let z = -1; z <= 1; z++) {
+        this.loadChunk(x, z);
       }
     }
   }
-}
 
-/* =======================
-   REMOVE BLOCK
-======================= */
-export function removeBlock(raycaster, scene) {
-  const hits = raycaster.intersectObjects(blocks);
+  /* =======================
+     CHUNK LOADING (STREAMING READY)
+  ======================= */
+  loadChunk(x, z) {
+    const key = `${x},${z}`;
 
-  if (hits.length > 0) {
-    const obj = hits[0].object;
+    if (this.chunks.has(key)) return;
 
-    scene.remove(obj);
+    const chunk = new Chunk(x, z);
+    chunk.build();
 
-    const i = blocks.indexOf(obj);
-    if (i !== -1) blocks.splice(i, 1);
+    this.scene.add(chunk.mesh);
+    this.chunks.set(key, chunk);
   }
-}
 
-/* =======================
-   PLACE BLOCK
-======================= */
-export function placeBlock(raycaster, scene) {
-  const hits = raycaster.intersectObjects(blocks);
+  unloadChunk(x, z) {
+    const key = `${x},${z}`;
+    const chunk = this.chunks.get(key);
 
-  if (hits.length > 0) {
-    const hit = hits[0];
+    if (!chunk) return;
 
-    const block = new THREE.Mesh(geo, mat);
-
-    block.position.copy(hit.object.position).add(hit.face.normal);
-
-    scene.add(block);
-    blocks.push(block);
+    this.scene.remove(chunk.mesh);
+    this.chunks.delete(key);
   }
-}
 
-/* =======================
-   ACCESSOR (optional)
-======================= */
-export function getBlocks() {
-  return blocks;
+  /* =======================
+     UPDATE (INFINITE WORLD HOOK)
+  ======================= */
+  update(playerPos) {
+    const px = Math.floor(playerPos.x / this.chunkSize);
+    const pz = Math.floor(playerPos.z / this.chunkSize);
+
+    for (let x = px - this.renderDistance; x <= px + this.renderDistance; x++) {
+      for (let z = pz - this.renderDistance; z <= pz + this.renderDistance; z++) {
+        this.loadChunk(x, z);
+      }
+    }
+  }
+
+  /* =======================
+     BLOCK EDITING
+  ======================= */
+  breakBlock(raycaster) {
+    for (let chunk of this.chunks.values()) {
+      const hits = raycaster.intersectObjects(chunk.blocks);
+      if (hits.length) {
+        const b = hits[0].object;
+        chunk.removeBlock(b);
+        break;
+      }
+    }
+  }
+
+  placeBlock(raycaster) {
+    for (let chunk of this.chunks.values()) {
+      const hits = raycaster.intersectObjects(chunk.blocks);
+      if (hits.length) {
+        const hit = hits[0];
+        chunk.addBlock(hit.object.position.clone().add(hit.face.normal));
+        break;
+      }
+    }
+  }
 }
