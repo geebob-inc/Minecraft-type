@@ -2,10 +2,11 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Voxel Engine Phase 2</title>
+<title>Voxel Engine - Better Graphics</title>
 <style>
-body { margin:0; overflow:hidden; }
+body { margin:0; overflow:hidden; cursor:crosshair; }
 canvas { display:block; }
+
 #crosshair{
   position:absolute;
   left:50%;
@@ -25,53 +26,137 @@ canvas { display:block; }
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
-// ===================== BASIC ENGINE =====================
+
+// ===================== SCENE =====================
 const scene = new THREE.Scene();
+
+// 🌫 better fog (huge visual upgrade)
+scene.fog = new THREE.Fog(0xa0d8ff, 15, 90);
+
+// 🌈 sky color
 scene.background = new THREE.Color(0x87ceeb);
 
 const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = false;
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
+// ☀️ fake sun lighting (important for Minecraft feel)
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(1,1,0.5);
+scene.add(sun);
+
+// ambient fill light
+scene.add(new THREE.AmbientLight(0x666666));
 
 // ===================== PLAYER =====================
-let player={x:0,y:10,z:0,vy:0};
+let player = { x:0,y:10,z:0,vy:0,onGround:false };
 
-// ===================== VOXEL WORLD =====================
+// ===================== MOVEMENT =====================
+let playerVel = {x:0,z:0};
+
+const maxSpeed = 0.12;
+const sprintSpeed = 0.20;
+const accel = 0.02;
+const friction = 0.85;
+const gravity = -0.015;
+const jumpPower = 0.30;
+
+// ===================== WORLD =====================
 const CHUNK=16;
 const RENDER=2;
-
 let chunks={};
+let voxels=new Map();
 
-// block type
+const geo=new THREE.BoxGeometry(1,1,1);
+
+// ===================== HEIGHT =====================
 function height(x,z){
-  return Math.floor(Math.sin(x*0.2)*3 + Math.cos(z*0.2)*3 + 7);
+  return Math.floor(
+    Math.sin(x*0.2)*3 +
+    Math.cos(z*0.2)*3 + 7
+  );
 }
 
-// ===================== MATERIAL (texture atlas style) =====================
-function tex(color){
+// ===================== 🎨 REAL TEXTURE FEEL =====================
+
+// grass (top + blend)
+function texGrass(){
   let c=document.createElement("canvas");
   c.width=c.height=32;
   let g=c.getContext("2d");
-  g.fillStyle=color;
+
+  g.fillStyle="#3cb043";
   g.fillRect(0,0,32,32);
+
+  // noise dots = better look
+  for(let i=0;i<60;i++){
+    g.fillStyle="rgba(0,0,0,0.1)";
+    g.fillRect(Math.random()*32,Math.random()*32,2,2);
+  }
+
   return new THREE.CanvasTexture(c);
 }
 
-const mat=new THREE.MeshBasicMaterial({map:tex("#3cb043")});
+// dirt
+function texDirt(){
+  let c=document.createElement("canvas");
+  c.width=c.height=32;
+  let g=c.getContext("2d");
 
-// ===================== GREEDY MESH SYSTEM =====================
-// we build ONE mesh per chunk instead of thousands of cubes
+  g.fillStyle="#8B5A2B";
+  g.fillRect(0,0,32,32);
 
+  for(let i=0;i<40;i++){
+    g.fillStyle="rgba(0,0,0,0.15)";
+    g.fillRect(Math.random()*32,Math.random()*32,2,2);
+  }
+
+  return new THREE.CanvasTexture(c);
+}
+
+// stone
+function texStone(){
+  let c=document.createElement("canvas");
+  c.width=c.height=32;
+  let g=c.getContext("2d");
+
+  g.fillStyle="#777";
+  g.fillRect(0,0,32,32);
+
+  for(let i=0;i<50;i++){
+    g.fillStyle="rgba(0,0,0,0.2)";
+    g.fillRect(Math.random()*32,Math.random()*32,2,2);
+  }
+
+  return new THREE.CanvasTexture(c);
+}
+
+// ===================== MATERIALS =====================
+const mats={
+  grass:new THREE.MeshLambertMaterial({map:texGrass()}),
+  dirt:new THREE.MeshLambertMaterial({map:texDirt()}),
+  stone:new THREE.MeshLambertMaterial({map:texStone()})
+};
+
+// ===================== BLOCK =====================
+function key(x,y,z){return x+","+y+","+z;}
+
+function addBlock(x,y,z,type){
+  let m=new THREE.Mesh(geo,mats[type]);
+  m.position.set(x,y,z);
+  scene.add(m);
+  voxels.set(key(x,y,z),1);
+}
+
+// ===================== CHUNKS =====================
 function buildChunk(cx,cz){
 
-  let geo=new THREE.BoxGeometry();
-  let vertices=[];
-  let positions=[];
+  let id=cx+","+cz;
+  if(chunks[id]) return;
 
-  let group=new THREE.Group();
+  let list=[];
 
   for(let x=0;x<CHUNK;x++){
     for(let z=0;z<CHUNK;z++){
@@ -81,23 +166,17 @@ function buildChunk(cx,cz){
 
       let h=height(wx,wz);
 
-      // ONLY SURFACE BLOCKS (key optimization idea)
       for(let y=0;y<h;y++){
+        let t="stone";
+        if(y===h-1) t="grass";
+        else if(y>h-3) t="dirt";
 
-        // only top layer gets rendered detail
-        if(y===h-1){
-
-          let cube=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),mat);
-          cube.position.set(wx,y,wz);
-
-          group.add(cube);
-        }
+        list.push(addBlock(wx,y,wz,t));
       }
     }
   }
 
-  scene.add(group);
-  chunks[cx+","+cz]=group;
+  chunks[id]=list;
 }
 
 // unload
@@ -105,7 +184,7 @@ function unload(cx,cz){
   for(let id in chunks){
     let [x,z]=id.split(",").map(Number);
     if(Math.abs(x-cx)>RENDER||Math.abs(z-cz)>RENDER){
-      scene.remove(chunks[id]);
+      chunks[id].forEach(b=>scene.remove(b));
       delete chunks[id];
     }
   }
@@ -113,12 +192,15 @@ function unload(cx,cz){
 
 // ===================== INPUT =====================
 let keys={};
+
 document.addEventListener("keydown",e=>keys[e.code]=true);
 document.addEventListener("keyup",e=>keys[e.code]=false);
 
-// mouse look
+// mouse
 let yaw=0,pitch=0;
+
 document.addEventListener("click",()=>document.body.requestPointerLock());
+
 document.addEventListener("mousemove",(e)=>{
   if(document.pointerLockElement){
     yaw-=e.movementX*0.002;
@@ -127,29 +209,63 @@ document.addEventListener("mousemove",(e)=>{
   }
 });
 
+// ===================== COLLISION =====================
+function solid(x,y,z){
+  return voxels.has(key(Math.round(x),Math.round(y),Math.round(z)));
+}
+
 // ===================== PLAYER UPDATE =====================
 function updatePlayer(){
 
-  let speed=0.15;
+  let speed = keys["ShiftLeft"] ? sprintSpeed : maxSpeed;
 
-  let fx=Math.sin(yaw);
-  let fz=Math.cos(yaw);
+  let forward = (keys["KeyW"]?1:0)-(keys["KeyS"]?1:0);
+  let strafe  = (keys["KeyD"]?1:0)-(keys["KeyA"]?1:0);
 
-  let rx=Math.cos(yaw);
-  let rz=-Math.sin(yaw);
+  let sin=Math.sin(yaw);
+  let cos=Math.cos(yaw);
 
-  if(keys["KeyW"]){player.x+=fx*speed;player.z+=fz*speed;}
-  if(keys["KeyS"]){player.x-=fx*speed;player.z-=fz*speed;}
-  if(keys["KeyA"]){player.x-=rx*speed;player.z-=rz*speed;}
-  if(keys["KeyD"]){player.x+=rx*speed;player.z+=rz*speed;}
+  let dx=(sin*forward + cos*strafe);
+  let dz=(cos*forward - sin*strafe);
 
-  player.vy-=0.01;
+  let len=Math.sqrt(dx*dx+dz*dz);
+  if(len>0){dx/=len;dz/=len;}
+
+  playerVel.x += dx*accel;
+  playerVel.z += dz*accel;
+
+  let vlen=Math.sqrt(playerVel.x**2 + playerVel.z**2);
+  if(vlen>speed){
+    playerVel.x=(playerVel.x/vlen)*speed;
+    playerVel.z=(playerVel.z/vlen)*speed;
+  }
+
+  playerVel.x*=friction;
+  playerVel.z*=friction;
+
+  let nx=player.x+playerVel.x;
+  let nz=player.z+playerVel.z;
+
+  if(!solid(nx,player.y,nz)){
+    player.x=nx;
+    player.z=nz;
+  }
+
+  // jump
+  if(keys["Space"] && player.onGround){
+    player.vy=jumpPower;
+    player.onGround=false;
+  }
+
+  // gravity
+  player.vy+=gravity;
   player.y+=player.vy;
 
-  let ground=height(player.x,player.z);
-  if(player.y<ground){
-    player.y=ground;
+  let g=height(player.x,player.z);
+  if(player.y<g){
+    player.y=g;
     player.vy=0;
+    player.onGround=true;
   }
 
   camera.position.set(player.x,player.y+1.6,player.z);
@@ -166,9 +282,7 @@ function loop(){
 
   for(let x=-RENDER;x<=RENDER;x++){
     for(let z=-RENDER;z<=RENDER;z++){
-      if(!chunks[(cx+x)+","+(cz+z)]){
-        buildChunk(cx+x,cz+z);
-      }
+      buildChunk(cx+x,cz+z);
     }
   }
 
@@ -186,6 +300,7 @@ window.addEventListener("resize",()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
 });
+
 </script>
 
 </body>
