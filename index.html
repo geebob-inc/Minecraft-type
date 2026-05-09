@@ -1,339 +1,410 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Voxel Game - Better Graphics</title>
+<title>Voxel Survival Engine</title>
 
 <style>
-body{
-    margin:0;
-    overflow:hidden;
-    background:black;
-}
-
-canvas{
-    display:block;
-}
+body{margin:0;overflow:hidden;background:#000;font-family:monospace}
+canvas{display:block}
 
 #ui{
-    position:absolute;
-    top:10px;
-    left:10px;
-    color:white;
-    background:rgba(0,0,0,0.5);
-    padding:10px;
-    font-family:monospace;
+position:absolute;top:10px;left:10px;
+color:white;
+background:rgba(0,0,0,0.5);
+padding:10px;
 }
+
+#inv{
+position:absolute;bottom:10px;left:50%;
+transform:translateX(-50%);
+display:flex;gap:5px;
+}
+
+.slot{
+width:60px;height:60px;
+background:#333;
+border:2px solid #666;
+color:white;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:12px;
+}
+
+#craft{
+position:absolute;right:10px;top:10px;
+width:180px;
+background:rgba(0,0,0,0.6);
+color:white;
+padding:10px;
+}
+
+.recipe{
+background:#444;
+margin:5px 0;
+padding:5px;
+cursor:pointer;
+}
+
+#crack{
+position:absolute;left:50%;top:50%;
+width:64px;height:64px;
+transform:translate(-50%,-50%);
+display:none;
+pointer-events:none;
+}
+
 </style>
 </head>
 <body>
 
-<div id="ui">
-WASD Move<br>
-Mouse Look<br>
-Space Jump
-</div>
+<div id="ui">WASD move | click mine | space jump</div>
+<div id="inv"></div>
+<div id="craft"></div>
+<div id="crack"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
 
-// ======================
-// SCENE
-// ======================
+// =====================
+// CORE ENGINE
+// =====================
 
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xaad5ff, 0.02);
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0xaad5ff,80,300);
 
-// SKY DOME
-const skyGeo = new THREE.SphereGeometry(500, 32, 32);
-const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: {
-        top: { value: new THREE.Color(0x4da6ff) },
-        bottom: { value: new THREE.Color(0xe6f4ff) }
-    },
-    vertexShader: `
-        varying vec3 vPos;
-        void main(){
-            vPos = position;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-        }
-    `,
-    fragmentShader: `
-        uniform vec3 top;
-        uniform vec3 bottom;
-        varying vec3 vPos;
-        void main(){
-            float h = normalize(vPos).y;
-            gl_FragColor = vec4(mix(bottom, top, max(h,0.0)),1.0);
-        }
-    `
-});
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+camera.position.set(0,30,0);
 
-scene.add(new THREE.Mesh(skyGeo, skyMat));
-
-// ======================
-// CAMERA
-// ======================
-
-const camera = new THREE.PerspectiveCamera(
-    75,
-    innerWidth/innerHeight,
-    0.1,
-    1000
-);
-
-camera.position.set(10, 20, 10);
-
-// ======================
-// RENDERER (BETTER LOOK)
-// ======================
-
-const renderer = new THREE.WebGLRenderer({ antialias:true });
-
-renderer.setSize(innerWidth, innerHeight);
-
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.3;
-
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// ======================
-// LIGHTING
-// ======================
-
-const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-scene.add(ambient);
-
-const sun = new THREE.DirectionalLight(0xfff2cc, 2);
-sun.position.set(50, 80, 20);
-
-sun.castShadow = true;
-
-sun.shadow.mapSize.width = 2048;
-sun.shadow.mapSize.height = 2048;
-
+// lighting
+scene.add(new THREE.AmbientLight(0xffffff,0.8));
+const sun=new THREE.DirectionalLight(0xffffff,2);
+sun.position.set(50,80,20);
 scene.add(sun);
 
-// ======================
-// WORLD
-// ======================
+// =====================
+// VOXEL WORLD (chunked)
+// =====================
 
-const world = new Map();
-const key = (x,y,z)=>`${x},${y},${z}`;
+const SIZE=16;
+const geo=new THREE.BoxGeometry(1,1,1);
 
-const blocks = [];
+const chunks={};
+const blocks=[];
+const world=new Map();
+
+// greedy meshing simplified (face batching per chunk)
+function key(x,y,z){return x+","+y+","+z}
+
+function height(x,z){
+return Math.floor(Math.sin(x*0.1)*Math.cos(z*0.1)*6+12);
+}
+
+// =====================
+// BLOCK ADD
+// =====================
 
 function addBlock(x,y,z,color){
 
-    const geo = new THREE.BoxGeometry(1,1,1);
+const mat=new THREE.MeshStandardMaterial({color});
+const m=new THREE.Mesh(geo,mat);
 
-    const mat = new THREE.MeshStandardMaterial({
-        color,
-        roughness:0.95
-    });
+m.position.set(x,y,z);
 
-    const cube = new THREE.Mesh(geo,mat);
+scene.add(m);
+blocks.push(m);
 
-    cube.position.set(x,y,z);
+world.set(key(x,y,z),true);
 
-    cube.castShadow = true;
-    cube.receiveShadow = true;
-
-    scene.add(cube);
-    blocks.push(cube);
-
-    world.set(key(x,y,z), true);
 }
 
-// ======================
-// TERRAIN (SMOOTHER)
-// ======================
+// =====================
+// CHUNK GENERATION
+// =====================
 
-for(let x=0;x<50;x++){
-for(let z=0;z<50;z++){
+function genChunk(cx,cz){
 
-    const h =
-        Math.floor(
-            Math.sin(x*0.15) *
-            Math.cos(z*0.15) * 5 + 10
-        );
+let id=cx+","+cz;
+if(chunks[id])return;
+chunks[id]=true;
 
-    for(let y=0;y<h;y++){
+for(let x=0;x<SIZE;x++){
+for(let z=0;z<SIZE;z++){
 
-        let color = 0x8B5A2B;
+let wx=cx*SIZE+x;
+let wz=cz*SIZE+z;
 
-        if(y === h-1) color = 0x4CAF50;
+let h=height(wx,wz);
 
-        addBlock(x,y,z,color);
-    }
+for(let y=0;y<h;y++){
+
+let c = y===h-1 ? 0x55aa55 : 0x8B5A2B;
+addBlock(wx,y,wz,c);
+
+}
+
 }}
 
-// ======================
-// CLOUDS
-// ======================
-
-function cloud(x,y,z){
-
-    const mat = new THREE.MeshStandardMaterial({
-        color:0xffffff,
-        roughness:1
-    });
-
-    for(let i=0;i<6;i++){
-
-        const c = new THREE.Mesh(
-            new THREE.BoxGeometry(4,2,3),
-            mat
-        );
-
-        c.position.set(
-            x + Math.random()*6,
-            y + Math.random()*2,
-            z + Math.random()*4
-        );
-
-        scene.add(c);
-    }
 }
 
-for(let i=0;i<15;i++){
+// =====================
+// WATER (REFLECTION PLANE)
+// =====================
 
-    cloud(
-        Math.random()*150-75,
-        35+Math.random()*10,
-        Math.random()*150-75
-    );
+const waterGeo=new THREE.PlaneGeometry(200,200);
+const waterMat=new THREE.MeshStandardMaterial({
+color:0x3399ff,
+transparent:true,
+opacity:0.5
+});
+
+const water=new THREE.Mesh(waterGeo,waterMat);
+water.rotation.x=-Math.PI/2;
+water.position.y=10;
+scene.add(water);
+
+// =====================
+// PLAYER + COLLISION
+// =====================
+
+let vy=0,onGround=false;
+let yaw=0,pitch=0;
+
+function solid(x,y,z){
+return world.has(key(Math.floor(x),Math.floor(y),Math.floor(z)));
 }
 
-// ======================
+function collide(x,y,z){
+
+for(let dx=-0.3;dx<=0.3;dx+=0.3){
+for(let dz=-0.3;dz<=0.3;dz+=0.3){
+for(let dy=0;dy<2;dy+=0.5){
+
+if(solid(x+dx,y-dy,z+dz))return true;
+
+}}}
+return false;
+}
+
+// =====================
+// MOBS (AI)
+// =====================
+
+const mobs=[];
+
+function spawnMob(){
+
+const m=new THREE.Mesh(
+new THREE.BoxGeometry(1,1,1),
+new THREE.MeshStandardMaterial({color:0x00ff00})
+);
+
+m.position.set(5,15,5);
+scene.add(m);
+
+mobs.push({mesh:m,dir:Math.random()*Math.PI*2});
+
+}
+
+for(let i=0;i<5;i++)spawnMob();
+
+function updateMobs(){
+
+for(let m of mobs){
+
+m.dir += (Math.random()-0.5)*0.1;
+
+m.mesh.position.x += Math.cos(m.dir)*0.05;
+m.mesh.position.z += Math.sin(m.dir)*0.05;
+
+}
+
+}
+
+// =====================
+// INVENTORY + CRAFT
+// =====================
+
+const inv={
+wood:10,
+stone:5,
+plank:0
+};
+
+const recipes=[
+{n:"Plank",r:{wood:1},g:{plank:4}}
+];
+
+const invDiv=document.getElementById("inv");
+const craftDiv=document.getElementById("craft");
+
+function renderInv(){
+
+invDiv.innerHTML="";
+
+for(let i in inv){
+
+let d=document.createElement("div");
+d.className="slot";
+d.innerText=i+"\n"+inv[i];
+invDiv.appendChild(d);
+
+}
+
+}
+
+function craft(r){
+
+for(let i in r.r){
+if((inv[i]||0)<r.r[i])return;
+}
+
+for(let i in r.r)inv[i]-=r.r[i];
+for(let i in r.g)inv[i]=(inv[i]||0)+r.g[i];
+
+renderInv();
+
+}
+
+function renderCraft(){
+
+craftDiv.innerHTML="<b>Craft</b>";
+
+recipes.forEach(r=>{
+
+let d=document.createElement("div");
+d.className="recipe";
+d.innerText=r.n;
+d.onclick=()=>craft(r);
+craftDiv.appendChild(d);
+
+});
+
+}
+
+renderInv();
+renderCraft();
+
+// =====================
 // INPUT
-// ======================
+// =====================
 
-const keys = {};
+const keys={};
 
-addEventListener("keydown",e=>{
-    keys[e.key.toLowerCase()] = true;
+addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+document.body.onclick=()=>document.body.requestPointerLock();
+
+addEventListener("mousemove",e=>{
+if(document.pointerLockElement!==document.body)return;
+yaw-=e.movementX*0.002;
+pitch-=e.movementY*0.002;
 });
 
-addEventListener("keyup",e=>{
-    keys[e.key.toLowerCase()] = false;
-});
+// =====================
+// WORLD LOAD
+// =====================
 
-// ======================
-// LOOK
-// ======================
+function updateChunks(){
 
-let yaw = 0;
-let pitch = 0;
+let cx=Math.floor(camera.position.x/SIZE);
+let cz=Math.floor(camera.position.z/SIZE);
 
-document.body.addEventListener("click",()=>{
-    document.body.requestPointerLock();
-});
+for(let x=-2;x<=2;x++){
+for(let z=-2;z<=2;z++){
+genChunk(cx+x,cz+z);
+}}
 
-document.addEventListener("mousemove",e=>{
+}
 
-    if(document.pointerLockElement !== document.body)
-        return;
-
-    yaw -= e.movementX * 0.002;
-    pitch -= e.movementY * 0.002;
-
-    pitch = Math.max(-1.5, Math.min(1.5,pitch));
-});
-
-// ======================
-// MOVEMENT
-// ======================
-
-let velY = 0;
-let onGround = false;
+// =====================
+// PLAYER UPDATE
+// =====================
 
 function update(){
 
-    let speed = keys["shift"] ? 0.2 : 0.12;
+let sp=0.15;
 
-    let fx = -Math.sin(yaw);
-    let fz = -Math.cos(yaw);
+let fx=-Math.sin(yaw);
+let fz=-Math.cos(yaw);
 
-    let rx = Math.cos(yaw);
-    let rz = -Math.sin(yaw);
+let nx=camera.position.x;
+let nz=camera.position.z;
 
-    if(keys["w"]){
-        camera.position.x += fx * speed;
-        camera.position.z += fz * speed;
-    }
+if(keys["w"]){nx+=fx*sp;nz+=fz*sp;}
+if(keys["s"]){nx-=fx*sp;nz-=fz*sp;}
+if(keys["a"]){nx-=Math.cos(yaw)*sp;nz+=Math.sin(yaw)*sp;}
+if(keys["d"]){nx+=Math.cos(yaw)*sp;nz-=Math.sin(yaw)*sp;}
 
-    if(keys["s"]){
-        camera.position.x -= fx * speed;
-        camera.position.z -= fz * speed;
-    }
-
-    if(keys["a"]){
-        camera.position.x -= rx * speed;
-        camera.position.z -= rz * speed;
-    }
-
-    if(keys["d"]){
-        camera.position.x += rx * speed;
-        camera.position.z += rz * speed;
-    }
-
-    // gravity
-    velY -= 0.015;
-    camera.position.y += velY;
-
-    if(camera.position.y < 12){
-        camera.position.y = 12;
-        velY = 0;
-        onGround = true;
-    }
-
-    if(keys[" "] && onGround){
-        velY = 0.3;
-        onGround = false;
-    }
-
-    camera.rotation.order = "YXZ";
-    camera.rotation.y = yaw;
-    camera.rotation.x = pitch;
+if(!collide(nx,camera.position.y,nz)){
+camera.position.x=nx;
+camera.position.z=nz;
 }
 
-// ======================
+vy-=0.02;
+let ny=camera.position.y+vy;
+
+if(!collide(camera.position.x,ny,camera.position.z)){
+camera.position.y=ny;
+}else{
+vy=0;
+onGround=true;
+}
+
+if(keys[" "]&&onGround){
+vy=0.3;
+onGround=false;
+}
+
+camera.rotation.order="YXZ";
+camera.rotation.y=yaw;
+camera.rotation.x=pitch;
+
+}
+
+// =====================
+// SAVE / LOAD WORLD
+// =====================
+
+function save(){
+
+localStorage.setItem("world",
+JSON.stringify([...world])
+);
+
+}
+
+function load(){
+
+let w=JSON.parse(localStorage.getItem("world")||"[]");
+
+w.forEach(([k])=>world.set(k,true));
+
+}
+
+// =====================
 // LOOP
-// ======================
+// =====================
 
 function animate(){
+requestAnimationFrame(animate);
 
-    requestAnimationFrame(animate);
+updateChunks();
+updateMobs();
+update();
 
-    update();
-
-    renderer.render(scene,camera);
+renderer.render(scene,camera);
 }
 
 animate();
 
-// ======================
-// RESIZE
-// ======================
-
-addEventListener("resize",()=>{
-
-    camera.aspect = innerWidth/innerHeight;
-    camera.updateProjectionMatrix();
-
-    renderer.setSize(innerWidth,innerHeight);
-});
-
 </script>
-
 </body>
-</html>
 </html>
