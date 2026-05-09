@@ -2,157 +2,189 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Voxel Chunk Engine Fix</title>
+<title>Minecraft 3-Tab Inventory</title>
+
 <style>
-body{margin:0;overflow:hidden;background:#000}
-canvas{display:block}
+body{margin:0;background:#000;font-family:monospace;color:white}
+
+/* HOTBAR ALWAYS ON SCREEN */
+#hotbar{
+position:absolute;
+bottom:20px;
+left:50%;
+transform:translateX(-50%);
+display:flex;
+gap:4px;
+}
+
+/* INVENTORY WINDOW */
 #ui{
 position:absolute;
-top:10px;left:10px;
-color:white;
-font-family:monospace;
-background:#0008;
+left:50%;
+top:50%;
+transform:translate(-50%,-50%);
+background:#c6c6c6;
+border:4px solid #555;
 padding:10px;
+display:none;
+flex-direction:column;
+gap:10px;
+color:black;
 }
+
+/* TAB BUTTONS */
+#tabs{
+display:flex;
+gap:5px;
+}
+
+.tab{
+padding:5px;
+background:#888;
+cursor:pointer;
+border:2px solid #444;
+}
+
+.tab.active{
+background:#aaa;
+}
+
+/* PANELS */
+.panel{
+display:none;
+}
+
+.panel.active{
+display:grid;
+grid-template-columns:repeat(9,40px);
+gap:4px;
+}
+
+/* CRAFTING GRID */
+#craftGrid{
+grid-template-columns:repeat(3,40px);
+}
+
+/* SLOT */
+.slot{
+width:40px;
+height:40px;
+background:#8b8b8b;
+border:2px solid #3a3a3a;
+display:flex;
+align-items:center;
+justify-content:center;
+position:relative;
+cursor:pointer;
+user-select:none;
+}
+
+.count{
+position:absolute;
+bottom:2px;
+right:4px;
+font-size:10px;
+}
+
 </style>
 </head>
 <body>
 
-<div id="ui">Chunk engine: physics + render unified</div>
+<!-- HOTBAR -->
+<div id="hotbar"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- INVENTORY UI -->
+<div id="ui">
+
+<div id="tabs">
+<div class="tab active" onclick="openTab(0)">Inventory</div>
+<div class="tab" onclick="openTab(1)">Craft</div>
+<div class="tab" onclick="openTab(2)">Info</div>
+</div>
+
+<!-- TAB 1 -->
+<div id="invGrid" class="panel active"></div>
+
+<!-- TAB 2 -->
+<div id="craftGrid" class="panel"></div>
+
+<!-- TAB 3 (simple placeholder like Minecraft help panel) -->
+<div id="infoPanel" class="panel">
+Controls:<br>
+E = open inventory<br>
+Shift = quick move<br>
+Click = swap
+</div>
+
+</div>
 
 <script>
 
 //////////////////////////////
-// CORE ENGINE
+// ICONS
 //////////////////////////////
 
-const scene=new THREE.Scene();
-scene.fog=new THREE.Fog(0xaad5ff,40,160);
-
-const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-camera.position.set(0,30,0);
-
-const renderer=new THREE.WebGLRenderer();
-renderer.setSize(innerWidth,innerHeight);
-document.body.appendChild(renderer.domElement);
-
-scene.add(new THREE.AmbientLight(0xffffff,0.6));
-
-const sun=new THREE.DirectionalLight(0xffffff,1.2);
-sun.position.set(100,120,50);
-scene.add(sun);
+const icons={
+wood:"🪵",
+stick:"🪶",
+sword:"🗡️",
+meat:"🍖"
+};
 
 //////////////////////////////
-// VOXEL WORLD (SINGLE SOURCE OF TRUTH)
+// INVENTORY SYSTEM
 //////////////////////////////
 
-const world=new Map();
-
-function key(x,y,z){return x+","+y+","+z}
-
-// terrain function (used ONLY to generate world ONCE)
-function height(x,z){
-return Math.floor(Math.sin(x*0.08)*Math.cos(z*0.08)*6+12);
-}
+let inventory=Array(36).fill(null).map(()=>({id:null,count:0}));
+let crafting=Array(9).fill(null).map(()=>({id:null,count:0}));
 
 //////////////////////////////
-// CHUNK SYSTEM
+// ADD ITEM (STACKING)
 //////////////////////////////
 
-const CHUNK_SIZE=16;
-const chunks=new Map();
+function addItem(id,amount=1){
 
-function chunkKey(x,z){
-return x+","+z;
+for(let s of inventory){
+if(s.id===id && s.count<64){
+s.count+=amount;
+return;
+}
 }
 
-//////////////////////////////
-// GENERATE VOXEL DATA (REAL WORLD)
-//////////////////////////////
-
-function generateVoxelWorld(){
-
-for(let x=-64;x<64;x++){
-for(let z=-64;z<64;z++){
-
-let h=height(x,z);
-
-for(let y=0;y<h;y++){
-world.set(key(x,y,z),1);
+for(let s of inventory){
+if(!s.id){
+s.id=id;
+s.count=amount;
+return;
 }
-
 }
-
-}
-
-}
-
-generateVoxelWorld();
-
-//////////////////////////////
-// CHUNK BUILDER (RENDER = SAME DATA)
-//////////////////////////////
-
-const geo=new THREE.BoxGeometry(1,1,1);
-const mat=new THREE.MeshStandardMaterial({color:0x3aa655});
-
-function buildChunk(cx,cz){
-
-const group=new THREE.Group();
-
-for(let x=0;x<CHUNK_SIZE;x++){
-for(let z=0;z<CHUNK_SIZE;z++){
-
-let wx=cx*CHUNK_SIZE+x;
-let wz=cz*CHUNK_SIZE+z;
-
-for(let y=0;y<30;y++){
-
-if(world.has(key(wx,y,wz))){
-
-const cube=new THREE.Mesh(geo,mat);
-
-cube.position.set(wx,y,wz);
-
-group.add(cube);
-
-}
-
-}
-
-}
-
-}
-
-scene.add(group);
-
-return group;
 
 }
 
 //////////////////////////////
-// LOAD CHUNKS AROUND PLAYER
+// SHIFT MOVE (MINECRAFT STYLE)
 //////////////////////////////
 
-function updateChunks(){
+function shiftMove(from,to){
 
-let cx=Math.floor(camera.position.x/CHUNK_SIZE);
-let cz=Math.floor(camera.position.z/CHUNK_SIZE);
+if(!from.id) return;
 
-for(let x=-2;x<=2;x++){
-for(let z=-2;z<=2;z++){
-
-let id=chunkKey(cx+x,cz+z);
-
-if(!chunks.has(id)){
-
-let chunk=buildChunk(cx+x,cz+z);
-chunks.set(id,chunk);
-
+if(!to.id){
+to.id=from.id;
+to.count=from.count;
+from.id=null;
+from.count=0;
+return;
 }
 
+if(to.id===from.id){
+
+let total=to.count+from.count;
+to.count=Math.min(64,total);
+from.count=total>64?total-64:0;
+
+if(from.count===0){
+from.id=null;
 }
 
 }
@@ -160,111 +192,115 @@ chunks.set(id,chunk);
 }
 
 //////////////////////////////
-// PHYSICS (NOW USES SAME WORLD)
+// SLOT RENDER
 //////////////////////////////
 
-function solid(x,y,z){
-return world.has(key(Math.floor(x),Math.floor(y),Math.floor(z)));
+function slot(item,index,type){
+
+const d=document.createElement("div");
+d.className="slot";
+
+if(item.id){
+d.innerHTML=`
+<div>${icons[item.id]||"?"}</div>
+${item.count>1?`<div class="count">${item.count}</div>`:""}
+`;
 }
 
-let vy=0,onGround=false;
-let yaw=0,pitch=0;
+d.onclick=(e)=>{
 
-const keys={};
+if(e.shiftKey){
 
-addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
-addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+if(type==="inv") shiftMove(inventory[index],inventory[0]);
+if(type==="craft") shiftMove(crafting[index],inventory[0]);
 
-document.body.onclick=()=>document.body.requestPointerLock();
+render();
+return;
+}
 
-addEventListener("mousemove",e=>{
-if(document.pointerLockElement!==document.body)return;
-yaw-=e.movementX*0.002;
-pitch-=e.movementY*0.002;
-pitch=Math.max(-1.4,Math.min(1.4,pitch));
+// swap
+if(type==="inv"){
+let t=inventory[0];
+inventory[0]=inventory[index];
+inventory[index]=t;
+}
+
+if(type==="craft"){
+let t=crafting[0];
+crafting[0]=crafting[index];
+crafting[index]=t;
+}
+
+render();
+
+};
+
+return d;
+
+}
+
+//////////////////////////////
+// RENDER UI
+//////////////////////////////
+
+function render(){
+
+// inventory
+let inv=document.getElementById("invGrid");
+inv.innerHTML="";
+inventory.forEach((i,idx)=>inv.appendChild(slot(i,idx,"inv")));
+
+// crafting
+let craft=document.getElementById("craftGrid");
+craft.innerHTML="";
+crafting.forEach((i,idx)=>craft.appendChild(slot(i,idx,"craft")));
+
+// hotbar
+let hot=document.getElementById("hotbar");
+hot.innerHTML="";
+inventory.slice(0,9).forEach(i=>{
+let d=document.createElement("div");
+d.className="slot";
+d.innerHTML=i.id?icons[i.id]+" "+(i.count>1?i.count:""):"";
+hot.appendChild(d);
 });
 
-function collide(x,y,z){
+}
 
-for(let dx=-0.3;dx<=0.3;dx+=0.3){
-for(let dz=-0.3;dz<=0.3;dz+=0.3){
-for(let dy=0;dy<1.8;dy+=0.5){
+//////////////////////////////
+// TABS (MAX 3 LIKE YOU ASKED)
+//////////////////////////////
 
-if(solid(x+dx,y-dy,z+dz))return true;
+function openTab(i){
 
-}}}
-return false;
+document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+
+document.querySelectorAll(".panel")[i].classList.add("active");
+document.querySelectorAll(".tab")[i].classList.add("active");
 
 }
 
 //////////////////////////////
-// PLAYER UPDATE
+// OPEN INVENTORY
 //////////////////////////////
 
-function updatePlayer(){
-
-let sp=0.12;
-
-let fx=-Math.sin(yaw);
-let fz=-Math.cos(yaw);
-
-let nx=camera.position.x;
-let nz=camera.position.z;
-
-if(keys["w"]){nx+=fx*sp;nz+=fz*sp;}
-if(keys["s"]){nx-=fx*sp;nz-=fz*sp;}
-if(keys["a"]){nx-=Math.cos(yaw)*sp;nz+=Math.sin(yaw)*sp;}
-if(keys["d"]){nx+=Math.cos(yaw)*sp;nz-=Math.sin(yaw)*sp;}
-
-if(!collide(nx,camera.position.y,nz)){
-camera.position.x=nx;
-camera.position.z=nz;
+addEventListener("keydown",e=>{
+if(e.key.toLowerCase()==="e"){
+let ui=document.getElementById("ui");
+ui.style.display=ui.style.display==="none"?"flex":"none";
 }
-
-vy-=0.02;
-let ny=camera.position.y+vy;
-
-if(!collide(camera.position.x,ny,camera.position.z)){
-camera.position.y=ny;
-onGround=false;
-}else{
-vy=0;
-onGround=true;
-}
-
-if(keys[" "]&&onGround){
-vy=0.3;
-onGround=false;
-}
-
-camera.rotation.order="YXZ";
-camera.rotation.y=yaw;
-camera.rotation.x=pitch;
-
-}
-
-//////////////////////////////
-// GAME LOOP
-//////////////////////////////
-
-function animate(){
-
-requestAnimationFrame(animate);
-
-updateChunks();   // render system
-updatePlayer();   // physics system
-
-renderer.render(scene,camera);
-
-}
-
-animate();
-
-addEventListener("resize",()=>{
-camera.aspect=innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
 });
+
+//////////////////////////////
+// TEST ITEMS
+//////////////////////////////
+
+addItem("wood",20);
+addItem("stick",10);
+addItem("meat",5);
+
+render();
 
 </script>
 
