@@ -1,25 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Mini Minecraft</title>
+  <meta charset="utf-8" />
+  <title>Voxel Engine</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-    #info {
+    #hud {
       position: absolute;
       top: 10px;
       left: 10px;
       color: white;
       font-family: sans-serif;
-      background: rgba(0,0,0,0.4);
+      background: rgba(0,0,0,0.5);
       padding: 8px;
     }
   </style>
 </head>
 <body>
-<div id="info">Click to lock • WASD move • Left click break • Right click place</div>
+<div id="hud">Click to lock • WASD move • 1-3 select block</div>
 
 <script type="module" src="./main.js"></script>
 </body>
+</html>
 </html>
