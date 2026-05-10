@@ -3,14 +3,18 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Voxel Engine HD - 2 Block Tall Player</title>
+<title>Ultra HD Voxel Engine</title>
 
 <style>
-body{
+*{
   margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+body{
   overflow:hidden;
   background:black;
-  cursor:crosshair;
   font-family:sans-serif;
 }
 
@@ -19,49 +23,74 @@ canvas{
 }
 
 #crosshair{
-  position:absolute;
+  position:fixed;
   left:50%;
   top:50%;
-  width:8px;
-  height:8px;
+  width:10px;
+  height:10px;
+  transform:translate(-50%,-50%);
   border:2px solid white;
   border-radius:50%;
-  transform:translate(-50%,-50%);
-  box-shadow:0 0 10px white;
+  box-shadow:
+    0 0 5px white,
+    0 0 15px white;
+  pointer-events:none;
+}
+
+#hud{
+  position:fixed;
+  top:10px;
+  left:10px;
+  color:white;
+  font-size:14px;
+  text-shadow:0 0 5px black;
 }
 </style>
 </head>
 <body>
 
 <div id="crosshair"></div>
+<div id="hud">
+W = Forward<br>
+S = Backward<br>
+A = Left<br>
+D = Right<br>
+SHIFT = Sprint<br>
+SPACE = Jump
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
 
-// =====================================================
+// ======================================================
 // SCENE
-// =====================================================
+// ======================================================
 
 const scene = new THREE.Scene();
 
 scene.background = new THREE.Color(0x87CEEB);
 
-scene.fog = new THREE.FogExp2(0xaad6ff, 0.018);
+scene.fog = new THREE.FogExp2(0xbfdfff, 0.012);
 
-// =====================================================
+// ======================================================
 // CAMERA
-// =====================================================
+// ======================================================
 
 const camera = new THREE.PerspectiveCamera(
-  75,
+  80,
   innerWidth / innerHeight,
   0.1,
-  1000
+  2000
 );
 
+// ======================================================
+// RENDERER
+// ======================================================
+
 const renderer = new THREE.WebGLRenderer({
-  antialias:true
+  antialias:true,
+  powerPreference:"high-performance"
 });
 
 renderer.setSize(innerWidth, innerHeight);
@@ -69,41 +98,49 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 document.body.appendChild(renderer.domElement);
 
-// =====================================================
-// LIGHTING (BETTER GRAPHICS)
-// =====================================================
+// ======================================================
+// LIGHTING
+// ======================================================
 
 const hemi = new THREE.HemisphereLight(
   0xffffff,
-  0x444444,
-  1.2
+  0x445566,
+  1.6
 );
 
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+const sun = new THREE.DirectionalLight(
+  0xffffff,
+  2.2
+);
 
-sun.position.set(40, 80, 20);
+sun.position.set(100,120,60);
 
 sun.castShadow = true;
 
-sun.shadow.mapSize.width = 2048;
-sun.shadow.mapSize.height = 2048;
+sun.shadow.mapSize.width = 4096;
+sun.shadow.mapSize.height = 4096;
 
-sun.shadow.camera.left = -80;
-sun.shadow.camera.right = 80;
-sun.shadow.camera.top = 80;
-sun.shadow.camera.bottom = -80;
+sun.shadow.camera.left = -120;
+sun.shadow.camera.right = 120;
+sun.shadow.camera.top = 120;
+sun.shadow.camera.bottom = -120;
+
+sun.shadow.bias = -0.0001;
 
 scene.add(sun);
 
-// =====================================================
+// ======================================================
 // FPS RIG
-// =====================================================
+// ======================================================
 
 const playerYaw = new THREE.Object3D();
 const playerPitch = new THREE.Object3D();
@@ -113,115 +150,139 @@ playerYaw.add(playerPitch);
 
 scene.add(playerYaw);
 
-// =====================================================
-// PLAYER (2 BLOCKS TALL)
-// =====================================================
+// ======================================================
+// PLAYER
+// ======================================================
 
 const PLAYER_HEIGHT = 2;
 
-let player = {
+const player = {
   x:0,
-  y:20,
+  y:25,
   z:0,
   vy:0,
   onGround:false
 };
 
-// eye level
 const eyeHeight = 1.7;
 
-// =====================================================
+// ======================================================
 // MOVEMENT
-// =====================================================
+// ======================================================
 
-let vel = {x:0,z:0};
+const keys = {};
+
+let vel = {
+  x:0,
+  z:0
+};
 
 const walkSpeed = 0.12;
 const sprintSpeed = 0.22;
 
-const accel = 0.025;
-const friction = 0.85;
+const accel = 0.028;
+const friction = 0.82;
 
 const gravity = -0.018;
-const jumpPower = 0.35;
+const jumpPower = 0.34;
 
-// =====================================================
+// ======================================================
 // WORLD
-// =====================================================
+// ======================================================
 
 const CHUNK = 16;
-const RENDER = 3;
+const RENDER = 4;
 
-const voxels = new Map();
 const chunks = {};
+const voxels = new Map();
 
 const geo = new THREE.BoxGeometry(1,1,1);
 
-// =====================================================
+// ======================================================
 // TERRAIN
-// =====================================================
+// ======================================================
 
 function height(x,z){
 
   return Math.floor(
-    Math.sin(x*0.08) * 5 +
-    Math.cos(z*0.08) * 5 +
-    Math.sin((x+z)*0.04) * 3 +
-    10
+
+    Math.sin(x * 0.05) * 6 +
+    Math.cos(z * 0.05) * 6 +
+    Math.sin((x+z) * 0.025) * 4 +
+    Math.sin(x * 0.2) * 1.5 +
+    12
   );
 }
 
-// =====================================================
-// HD TEXTURES
-// =====================================================
+// ======================================================
+// TEXTURE GENERATOR
+// ======================================================
 
-function makeTexture(base, dark){
+function makeTexture(base, dark, light){
 
   const c = document.createElement("canvas");
-  c.width = c.height = 64;
+
+  c.width = 128;
+  c.height = 128;
 
   const g = c.getContext("2d");
 
-  // base
   g.fillStyle = base;
-  g.fillRect(0,0,64,64);
+  g.fillRect(0,0,128,128);
 
-  // detailed noise
-  for(let i=0;i<400;i++){
+  // noise
+  for(let i=0;i<2500;i++){
 
-    const x = Math.random()*64;
-    const y = Math.random()*64;
+    g.fillStyle = `rgba(0,0,0,${Math.random()*0.08})`;
 
-    const alpha = Math.random()*0.18;
-
-    g.fillStyle = `rgba(0,0,0,${alpha})`;
-
-    g.fillRect(x,y,2,2);
+    g.fillRect(
+      Math.random()*128,
+      Math.random()*128,
+      2,
+      2
+    );
   }
 
   // highlights
-  for(let i=0;i<120;i++){
+  for(let i=0;i<1000;i++){
 
-    const x = Math.random()*64;
-    const y = Math.random()*64;
+    g.fillStyle = `rgba(255,255,255,${Math.random()*0.05})`;
 
-    g.fillStyle = `rgba(255,255,255,0.05)`;
-
-    g.fillRect(x,y,1,1);
+    g.fillRect(
+      Math.random()*128,
+      Math.random()*128,
+      1,
+      1
+    );
   }
 
   // darker patches
-  g.fillStyle = dark;
-
-  for(let i=0;i<25;i++){
+  for(let i=0;i<100;i++){
 
     g.globalAlpha = 0.12;
 
+    g.fillStyle = dark;
+
     g.fillRect(
-      Math.random()*64,
-      Math.random()*64,
-      Math.random()*10,
-      Math.random()*10
+      Math.random()*128,
+      Math.random()*128,
+      Math.random()*20,
+      Math.random()*20
+    );
+  }
+
+  // brighter patches
+  for(let i=0;i<50;i++){
+
+    g.globalAlpha = 0.06;
+
+    g.fillStyle = light;
+
+    g.fillRect(
+      Math.random()*128,
+      Math.random()*128,
+      Math.random()*25,
+      Math.random()*25
     );
   }
 
@@ -233,35 +294,44 @@ function makeTexture(base, dark){
   return tex;
 }
 
+// ======================================================
+// MATERIALS
+// ======================================================
+
 const mats = {
 
   grass:new THREE.MeshStandardMaterial({
-    map:makeTexture("#4CAF50","#2E7D32"),
-    roughness:1
+    map:makeTexture("#4CAF50","#2E7D32","#81C784"),
+    roughness:0.95
   }),
 
   dirt:new THREE.MeshStandardMaterial({
-    map:makeTexture("#8B5A2B","#5D4037"),
+    map:makeTexture("#8B5A2B","#5D4037","#A1887F"),
     roughness:1
   }),
 
   stone:new THREE.MeshStandardMaterial({
-    map:makeTexture("#888","#555"),
-    roughness:0.9
+    map:makeTexture("#888","#555","#BBB"),
+    roughness:0.88,
+    metalness:0.05
   })
 };
 
-// =====================================================
+// ======================================================
 // BLOCKS
-// =====================================================
+// ======================================================
 
 function key(x,y,z){
+
   return `${x},${y},${z}`;
 }
 
 function addBlock(x,y,z,type){
 
-  const mesh = new THREE.Mesh(geo, mats[type]);
+  const mesh = new THREE.Mesh(
+    geo,
+    mats[type]
+  );
 
   mesh.position.set(x,y,z);
 
@@ -275,9 +345,9 @@ function addBlock(x,y,z,type){
   return mesh;
 }
 
-// =====================================================
+// ======================================================
 // CHUNKS
-// =====================================================
+// ======================================================
 
 function buildChunk(cx,cz){
 
@@ -290,8 +360,8 @@ function buildChunk(cx,cz){
   for(let x=0;x<CHUNK;x++){
     for(let z=0;z<CHUNK;z++){
 
-      const wx = cx*CHUNK + x;
-      const wz = cz*CHUNK + z;
+      const wx = cx * CHUNK + x;
+      const wz = cz * CHUNK + z;
 
       const h = height(wx,wz);
 
@@ -300,9 +370,11 @@ function buildChunk(cx,cz){
         let type = "stone";
 
         if(y === h-1){
+
           type = "grass";
         }
         else if(y > h-4){
+
           type = "dirt";
         }
 
@@ -316,9 +388,9 @@ function buildChunk(cx,cz){
   chunks[id] = list;
 }
 
-// =====================================================
-// UNLOAD CHUNKS
-// =====================================================
+// ======================================================
+// UNLOAD
+// ======================================================
 
 function unloadChunks(cx,cz){
 
@@ -349,23 +421,23 @@ function unloadChunks(cx,cz){
   }
 }
 
-// =====================================================
+// ======================================================
 // INPUT
-// =====================================================
-
-const keys = {};
+// ======================================================
 
 document.addEventListener("keydown", e=>{
+
   keys[e.code] = true;
 });
 
 document.addEventListener("keyup", e=>{
+
   keys[e.code] = false;
 });
 
-// =====================================================
+// ======================================================
 // MOUSE LOOK
-// =====================================================
+// ======================================================
 
 let yaw = 0;
 let pitch = 0;
@@ -384,7 +456,7 @@ document.addEventListener("mousemove", e=>{
 
     pitch = Math.max(
       -1.5,
-      Math.min(1.5, pitch)
+      Math.min(1.5,pitch)
     );
 
     playerYaw.rotation.y = yaw;
@@ -392,9 +464,9 @@ document.addEventListener("mousemove", e=>{
   }
 });
 
-// =====================================================
+// ======================================================
 // COLLISION
-// =====================================================
+// ======================================================
 
 function solid(x,y,z){
 
@@ -407,11 +479,6 @@ function solid(x,y,z){
   );
 }
 
-// =====================================================
-// PLAYER COLLISION
-// 2 BLOCK TALL HITBOX
-// =====================================================
-
 function collides(x,y,z){
 
   return (
@@ -420,38 +487,48 @@ function collides(x,y,z){
   );
 }
 
-// =====================================================
+// ======================================================
 // PLAYER UPDATE
-// =====================================================
+// ======================================================
 
 function updatePlayer(){
 
-  const speed = keys["ShiftLeft"]
+  const speed =
+    keys["ShiftLeft"]
     ? sprintSpeed
     : walkSpeed;
 
+  // =========================================
+  // CORRECT MOVEMENT:
+  // W = FORWARD
+  // S = BACKWARD
+  // A = LEFT
+  // D = RIGHT
+  // =========================================
+
   const forward =
-    (keys["KeyW"]?1:0) -
-    (keys["KeyS"]?1:0);
+    (keys["KeyW"] ? 1 : 0) -
+    (keys["KeyS"] ? 1 : 0);
 
   const strafe =
-    (keys["KeyD"]?1:0) -
-    (keys["KeyA"]?1:0);
+    (keys["KeyD"] ? 1 : 0) -
+    (keys["KeyA"] ? 1 : 0);
 
   const sin = Math.sin(yaw);
   const cos = Math.cos(yaw);
 
   let dx =
-    sin*forward +
-    cos*strafe;
+    sin * forward +
+    cos * strafe;
 
   let dz =
-    cos*forward -
-    sin*strafe;
+    cos * forward -
+    sin * strafe;
 
   const len = Math.hypot(dx,dz);
 
   if(len > 0){
+
     dx /= len;
     dz /= len;
   }
@@ -459,66 +536,95 @@ function updatePlayer(){
   vel.x += dx * accel;
   vel.z += dz * accel;
 
-  const vlen = Math.hypot(vel.x, vel.z);
+  const vlen = Math.hypot(
+    vel.x,
+    vel.z
+  );
 
   if(vlen > speed){
 
-    vel.x = (vel.x/vlen)*speed;
-    vel.z = (vel.z/vlen)*speed;
+    vel.x =
+      vel.x / vlen * speed;
+
+    vel.z =
+      vel.z / vlen * speed;
   }
 
   vel.x *= friction;
   vel.z *= friction;
 
-  // horizontal collision
+  // X COLLISION
+
   let nx = player.x + vel.x;
 
-  if(!collides(nx, player.y, player.z)){
+  if(!collides(nx,player.y,player.z)){
+
     player.x = nx;
   }
 
+  // Z COLLISION
+
   let nz = player.z + vel.z;
 
-  if(!collides(player.x, player.y, nz)){
+  if(!collides(player.x,player.y,nz)){
+
     player.z = nz;
   }
 
-  // jump
-  if(keys["Space"] && player.onGround){
+  // JUMP
+
+  if(
+    keys["Space"] &&
+    player.onGround
+  ){
 
     player.vy = jumpPower;
+
     player.onGround = false;
   }
 
-  // gravity
+  // GRAVITY
+
   player.vy += gravity;
 
   let ny = player.y + player.vy;
 
-  if(!collides(player.x, ny, player.z)){
+  if(
+    !collides(
+      player.x,
+      ny,
+      player.z
+    )
+  ){
 
     player.y = ny;
   }
   else{
 
     if(player.vy < 0){
+
       player.onGround = true;
     }
 
     player.vy = 0;
   }
 
-  // terrain fallback
-  const ground = height(player.x, player.z);
+  // TERRAIN SAFETY
+
+  const ground =
+    height(player.x,player.z);
 
   if(player.y < ground){
 
     player.y = ground;
+
     player.vy = 0;
+
     player.onGround = true;
   }
 
-  // camera position
+  // CAMERA
+
   playerYaw.position.set(
     player.x,
     player.y + eyeHeight,
@@ -526,21 +632,27 @@ function updatePlayer(){
   );
 }
 
-// =====================================================
+// ======================================================
 // LOOP
-// =====================================================
+// ======================================================
 
 function loop(){
 
   requestAnimationFrame(loop);
 
-  const cx = Math.floor(player.x / CHUNK);
-  const cz = Math.floor(player.z / CHUNK);
+  const cx =
+    Math.floor(player.x / CHUNK);
+
+  const cz =
+    Math.floor(player.z / CHUNK);
 
   for(let x=-RENDER;x<=RENDER;x++){
     for(let z=-RENDER;z<=RENDER;z++){
 
-      buildChunk(cx+x, cz+z);
+      buildChunk(
+        cx+x,
+        cz+z
+      );
     }
   }
 
@@ -553,13 +665,14 @@ function loop(){
 
 loop();
 
-// =====================================================
+// ======================================================
 // RESIZE
-// =====================================================
+// ======================================================
 
 window.addEventListener("resize", ()=>{
 
-  camera.aspect = innerWidth/innerHeight;
+  camera.aspect =
+    innerWidth / innerHeight;
 
   camera.updateProjectionMatrix();
 
@@ -570,6 +683,5 @@ window.addEventListener("resize", ()=>{
 });
 
 </script>
-
 </body>
 </html>
